@@ -87,9 +87,9 @@ Key experimental parameters:
 | delta | Cache threshold |
 | gamma | Bidirectional correction strength |
 
-Our experiments evaluate T = 40, 30, 20, and 12.
+Our experiments evaluate the original DDIM with T = 40, 30, 20, and 12.
 
-For aggressive caching at T = 12, we use delta = 0.30 and gamma = 0.5.
+For aggressive caching, we use delta = 0.30 and gamma = 0.5.
 
 Detailed inference commands and example configurations will be provided with the code release.
 
