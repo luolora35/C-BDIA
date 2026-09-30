@@ -36,10 +36,10 @@ The following results compare C-BDIA with cached DDIM (C-DDIM) at comparable inf
 
 | Method | Speedup | CLIP | LPIPS | SSIM | PSNR |
 |---|---:|---:|---:|---:|---:|
-| C-DDIM | 2.37x | 26.32 | 0.5799 | 0.5584 | 16.36 |
-| C-BDIA | 2.41x | 33.34 | 0.4411 | 0.5855 | 16.16 |
-| C-DDIM | 3.62x | 25.25 | 0.7007 | 0.5131 | 13.87 |
-| C-BDIA | 3.62x | 30.08 | 0.6157 | 0.5471 | 15.97 |
+| C-DDIM (0.14) | 2.37x | 26.32 | 0.5799 | 0.5584 | 16.36 |
+| C-BDIA (0.14) | 2.41x | 33.34 | 0.4411 | 0.5855 | 16.16 |
+| C-DDIM (0.3) | 3.62x | 25.25 | 0.7007 | 0.5131 | 13.87 |
+| C-BDIA (0.3) | 3.62x | 30.08 | 0.6157 | 0.5471 | 15.97 |
 
 C-BDIA demonstrates improved editing quality under aggressive caching while maintaining comparable inference efficiency.
 
