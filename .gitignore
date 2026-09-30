@@ -173,3 +173,9 @@ tags
 .DS_Store
 # RL pipelines may produce mp4 outputs
 *.mp4
+*.bak_exp
+clip_scores.csv
+metrics_results.csv
+figure_bdia_vs_ddim.png
+plot_PCA.py
+plot_PCA1.py

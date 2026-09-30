@@ -84,7 +84,11 @@ class UNetPseudo3DConditionModel(ModelMixin, ConfigMixin):
         if 'temporal_downsample' in kwargs and  kwargs['temporal_downsample'] is True:
             kwargs['temporal_downsample_time'] = 3
         self.temporal_downsample_time = kwargs.get('temporal_downsample_time', 0)
-        
+
+        # ===== FLOPs 相关计数（新增）=====
+        self.unet_call_cnt = 0   # 真正完整跑 UNet 的次数（没有被 TeaCache 复用）
+        self.unet_skip_cnt = 0   # 被 TeaCache 直接复用输出的次数
+
         # input
         self.conv_in = PseudoConv3d(in_channels, block_out_channels[0], 
                                     kernel_size=3, padding=(1, 1), model_config=kwargs)
@@ -318,6 +322,7 @@ class UNetPseudo3DConditionModel(ModelMixin, ConfigMixin):
         # However, the upsampling interpolation output size can be forced to fit any upsampling size
         # on the fly if necessary.
         default_overall_up_factor = 2**self.num_upsamplers
+
 
         # upsample size should be forwarded when sample is not a multiple of `default_overall_up_factor`
         forward_upsample_size = False

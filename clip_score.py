@@ -50,6 +50,6 @@ def evaluate_folder(folder_path, text, output_csv="clip_results.csv", model_name
 
 if __name__ == "__main__":
     # 修改为你的路径和文本
-    folder_path = "/data/huiluo/FateZero/result/style/jeep_watercolor_251112-170428/sample/step_0_1_0"  # 存放图片的文件夹
+    folder_path = "/home/huiluo/Data/FateZero/result/style/jeep_watercolor_260910-160959/sample/step_0_1_0"  # 存放图片的文件夹
     text = "watercolor painting of a silver jeep driving down a curvy road in the countryside."
     evaluate_folder(folder_path, text, output_csv="clip_scores.csv")

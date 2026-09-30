@@ -1,7 +1,6 @@
 from diffusers.schedulers import DDIMScheduler
 from video_diffusion.pipelines.p2p_ddim_spatial_temporal import P2pDDIMSpatioTemporalPipeline
 from video_diffusion.pipelines.ddim_spatial_temporal import DDIMSpatioTemporalStableDiffusionPipeline
-
 from diffusers.schedulers.scheduling_ddim import DDIMSchedulerOutput
 from typing import Optional, Union, Tuple, List
 import numpy as np
@@ -14,7 +13,6 @@ class BDIASpatioTemporalStableDiffusionPipeline(DDIMSpatioTemporalStableDiffusio
         sample = x_t, timestep = t. Returns x_{t+Δ}^{BDIA}.
         """
         device, dtype = sample.device, sample.dtype
-
 
         # ---- 1) 步进索引（统一用均匀步；若用 timesteps 网格也可改成 searchsorted） ----
         ntrain = int(self.scheduler.config.num_train_timesteps)
@@ -34,8 +32,6 @@ class BDIASpatioTemporalStableDiffusionPipeline(DDIMSpatioTemporalStableDiffusio
         alpha_nxt = _ab(t_next)
         beta_t = 1.0 - alpha_t
         import pdb; pdb.set_trace()
-
-
 
         # ---- 3) 统一成 epsilon 语义（若 prediction_type = v_prediction）----
         pred_type = getattr(self.scheduler.config, "prediction_type", "epsilon")
@@ -61,7 +57,8 @@ class BDIASpatioTemporalStableDiffusionPipeline(DDIMSpatioTemporalStableDiffusio
         # ---- 6) BDIA 校正：+ γ * ( x_last - x_last^{DDIM(from current)} ) ----
         # 其中 x_last^{DDIM(from current)} = sqrt(ᾱ_{t_last}) * x0_hat + sqrt(1-ᾱ_{t_last}) * eps_t
         if not hasattr(self.scheduler, "gamma"):
-            self.scheduler.gamma = 0.9  # 默认 γ
+            self.scheduler.gamma = 0.0  # 默认 γ
+            print(1,float(self.scheduler.gamma))
         gamma = float(self.scheduler.gamma)
 
         if getattr(self.scheduler, "x_last", None) is not None and getattr(self.scheduler, "t_last", None) is not None:
@@ -75,7 +72,6 @@ class BDIASpatioTemporalStableDiffusionPipeline(DDIMSpatioTemporalStableDiffusio
         # ---- 7) 更新状态，供下一步使用（与采样侧保持同一语义）----
         self.scheduler.x_last = sample.detach()  # 保存 x_t
         self.scheduler.t_last = t_curr  # 保存 t
-
         return x_next
 
     # def next_clean2noise_step(self, model_output: Union[torch.FloatTensor, np.ndarray], timestep: int, sample: Union[torch.FloatTensor, np.ndarray]):
@@ -106,27 +102,28 @@ class P2pBDIASpatioTemporalStableDiffusionPipeline(P2pDDIMSpatioTemporalPipeline
         step = self.scheduler.config.num_train_timesteps // self.scheduler.num_inference_steps
         t_curr = timestep                      # 当前时刻 t
         print(f"{t_curr=}")
-        t_prev = max(t_curr - step, -1)        # t-Δ（更干净）
-        print(f"{t_prev=}")
+        # t_prev = max(t_curr - step, -1)        # t-Δ（更干净）
+        # print(f"{t_prev=}")
         # t_next = t_curr                        # 为了与原实现命名保持一致，下面仍用 alpha_prev / alpha_next
         t_next = min(t_curr + step, 981)
         print(f"{t_next=}")
+        t_last = max(timestep -step ,1)
+        print(f"{t_last=}")
 
-        # 1. get previous step value (=t-1)
-        prev_timestep = timestep - step
-        print("prev_timestep:", prev_timestep)
+        # 1. get previous step value (=t+1)
+        # prev_timestep = min(timestep + step, 981)
+        # print("prev_timestep:", prev_timestep)
         # 2. compute alphas, betas
         alpha_prod_t = self.scheduler.alphas_cumprod[timestep]
         print("timestep:", timestep)
 
-        alpha_prod_t_prev = self.scheduler.alphas_cumprod[prev_timestep] if prev_timestep >= 0 else self.scheduler.final_alpha_cumprod
-
+        # alpha_prod_t_prev = self.scheduler.alphas_cumprod[prev_timestep] if prev_timestep >= 0 else self.scheduler.final_alpha_cumprod
         beta_prod_t = 1 - alpha_prod_t
 
         # === 取 ᾱ_t 与 ᾱ_{t_next}（注意：alpha_cumprod 是升噪方向的累计乘积）===
-        alpha_prev = self.scheduler.alphas_cumprod[t_prev] if t_prev >= 0 else self.scheduler.final_alpha_cumprod
+        # alpha_prev = self.scheduler.alphas_cumprod[t_prev] if t_prev >= 0 else self.scheduler.final_alpha_cumprod
         alpha_next = self.scheduler.alphas_cumprod[t_next]
-        beta_prev = 1.0 - alpha_prev
+        beta_next = 1.0 - alpha_next
         alpha_curr = self.scheduler.alphas_cumprod[t_curr] if t_curr>= 0 else self.scheduler.final_alpha_cumprod
 
         # ---- 2) 统一到 epsilon 语义（若 prediction_type = v_prediction 先转 ε）----
@@ -150,7 +147,7 @@ class P2pBDIASpatioTemporalStableDiffusionPipeline(P2pDDIMSpatioTemporalPipeline
             self.scheduler.t_last = None
             # γ 可从外部设置；未设置则给个默认值（与你 step() 中一致）
             if not hasattr(self.scheduler, "gamma"):
-                self.scheduler.gamma = 0.9
+                self.scheduler.gamma = 0.0
             self.scheduler._runtime_inited = True
 
         if (self.scheduler.x_last is not None) and (self.scheduler.t_last is not None):
@@ -158,14 +155,17 @@ class P2pBDIASpatioTemporalStableDiffusionPipeline(P2pDDIMSpatioTemporalPipeline
                 self.scheduler.alphas_cumprod[self.scheduler.t_last]
                 if self.scheduler.t_last >= 0 else self.scheduler.final_alpha_cumprod
             )
+            print("self.scheduler.t_last", self.scheduler.t_last)
             prev_from_curr_ddim = a_last**0.5 * pred_original_sample + (1.0 - a_last)**0.5 * model_output
             next_sample = next_sample_ddim + self.scheduler.gamma * (self.scheduler.x_last - prev_from_curr_ddim)
-
+            print(self.scheduler.gamma)
         else:
             # 第一帧没有历史，退化为纯 DDIM
             next_sample = next_sample_ddim
+            print("start")
 
         self.scheduler.x_last = sample     # 保存当前帧 x_t
         self.scheduler.t_last = t_curr     # 保存当前时刻 t
 
         return next_sample
+

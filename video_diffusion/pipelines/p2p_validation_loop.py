@@ -126,6 +126,36 @@ class P2pSampleLogger:
                     save_path = save_dir,
                     **p2p_config_now,
                 )
+
+                # ===== Save one-step diagnostic records =====
+                if hasattr(pipeline, "_onestep_records"):
+                    diag_dir = os.path.join(self.logdir, "onestep_diag")
+                    os.makedirs(diag_dir, exist_ok=True)
+
+                    mode = (
+                        "cache"
+                        if getattr(pipeline.unet, "enable_teacache", False)
+                        else "full"
+                    )
+
+                    call_id = getattr(pipeline, "_onestep_call_id", 0)
+                    pipeline._onestep_call_id = call_id + 1
+
+                    diag_path = os.path.join(
+                        diag_dir,
+                        f"{mode}_prompt{idx}_seed{seed}_call{call_id}.pt"
+                    )
+
+                    torch.save(
+                        pipeline._onestep_records,
+                        diag_path
+                    )
+
+                    print(
+                        f"[OneStep] saved {len(pipeline._onestep_records)} "
+                        f"steps to {diag_path}"
+                    )
+
                 if self.prompt2prompt_edit:
                     sequence = sequence_return['sdimage_output'].images[0]
                     attention_output = sequence_return['attention_output']

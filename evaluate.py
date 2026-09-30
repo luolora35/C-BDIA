@@ -73,7 +73,7 @@ def evaluate_folder(folder_ref, folder_test, output_csv="results.csv"):
 if __name__ == "__main__":
     # 修改为你的文件夹路径
     # folder_ref = "/home/huiluo/Data/FateZero/result/attribute/dog_ddim_5.11/sample/step_0_1_0"
-    folder_ref = "/data/huiluo/FateZero/result/style/jeep_watercolor_251112-170428/train_samples"
-    folder_test = "/data/huiluo/FateZero/result/style/jeep_watercolor_251112-170428/sample/step_0_1_0"
+    folder_ref = "/data/huiluo/C-BDIA/result/style/DDIM50/train_samples"
+    folder_test = "/data/huiluo/C-BDIA/result/style/jeep_watercolor_260910-160959/sample/step_0_1_0"
     # folder_test = "/home/huiluo/Data/FateZero/result/attribute/dog_ddim_5.11/sample/step_0_1_0"
     evaluate_folder(folder_ref, folder_test, output_csv="metrics_results.csv")

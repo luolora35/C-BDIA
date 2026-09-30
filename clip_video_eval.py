@@ -48,9 +48,9 @@ if __name__ == "__main__":
     # ----------------------------
     # 输入设置
     # ----------------------------
-    gen_frames_folder = "/data/huiluo/FateZero/result/style/jeep_watercolor_251112-171630/sample/step_0_1_0"   # 生成后视频的帧
-    source_prompt = ""   # 原始 prompt
-    target_prompt = "A yellow corgi sitting on the mat"      # 目标 prompt
+    gen_frames_folder = "/data/huiluo/C-BDIA/result/style/DDIM40/sample/step_0_1_0"   # 生成后视频的帧
+    source_prompt = "a silver jeep driving down a curvy road in the countryside"   # 原始 prompt
+    target_prompt = "watercolor painting of a silver jeep driving down a curvy road in the countryside"      # 目标 prompt
 
     # ----------------------------
     # 加载模型

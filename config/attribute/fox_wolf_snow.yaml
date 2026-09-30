@@ -24,7 +24,8 @@ editing_config:
         a white fox sitting in the grass,
 
         # foreground texture style
-        a grey wolf sitting in the grass,
+        #a grey wolf sitting in the grass,
+        a red fox sitting in the grass,
         a white fox sitting in the snow
     ]
     p2p_config:
@@ -96,7 +97,8 @@ model_config:
     # least_sc_channel: 100000
 
 test_pipeline_config:
-    target: video_diffusion.pipelines.p2p_ddim_spatial_temporal.P2pDDIMSpatioTemporalPipeline
+    #target: video_diffusion.pipelines.p2p_ddim_spatial_temporal.P2pDDIMSpatioTemporalPipeline
+    target: video_diffusion.pipelines.BDIAState.P2pBDIASpatioTemporalStableDiffusionPipeline
     num_inference_steps: "${..validation_sample_logger.num_inference_steps}"
 
 

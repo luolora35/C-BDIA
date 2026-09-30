@@ -517,6 +517,8 @@ class SpatioTemporalStableDiffusionPipeline(DiffusionPipeline):
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
 
         # 7. Denoising loop
+        # One-step / trajectory diagnostic records
+        self._onestep_records = []
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -537,9 +539,40 @@ class SpatioTemporalStableDiffusionPipeline(DiffusionPipeline):
                         noise_pred_text - noise_pred_uncond
                     )
 
-                # compute the previous noisy sample x_t -> x_t-1 [1, 4, 8, 64, 64]
-                latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample
+                # ===== Diagnostic logging: state before scheduler step =====
+                latent_in_log = latents.detach().float().cpu()
+                noise_pred_log = noise_pred.detach().float().cpu()
 
+                if torch.is_tensor(t):
+                    timestep_log = int(t.detach().cpu().item())
+                else:
+                    timestep_log = int(t)
+
+                cache_hit_log = bool(
+                    getattr(self.unet, "_tc_last_cache_hit", False)
+                )
+
+                # compute x_t -> x_{t-1}
+                step_output = self.scheduler.step(
+                    noise_pred,
+                    t,
+                    latents,
+                    **extra_step_kwargs
+                )
+
+                latents = step_output.prev_sample
+
+                # ===== Save state after scheduler step =====
+                self._onestep_records.append(
+                    {
+                        "step_index": int(i),
+                        "timestep": timestep_log,
+                        "cache_hit": cache_hit_log,
+                        "latent_in": latent_in_log,
+                        "noise_pred": noise_pred_log,
+                        "latent_out": latents.detach().float().cpu(),
+                    }
+                )
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or (
                     (i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0

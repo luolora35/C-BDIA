@@ -32,31 +32,18 @@ from video_diffusion.common.image_util import log_train_samples
 from video_diffusion.common.instantiate_from_config import instantiate_from_config
 from video_diffusion.pipelines.p2p_validation_loop import P2pSampleLogger
 
-from dataclasses import dataclass
+
 from typing import List, Optional, Tuple, Union
-import torch.nn as nn
 import torch.utils.checkpoint
-
-from diffusers.configuration_utils import ConfigMixin, register_to_config
-
-from diffusers.modeling_utils import ModelMixin
 from diffusers.utils import BaseOutput, logging
-from diffusers.models.embeddings import TimestepEmbedding, Timesteps
 from typing import Union, Tuple  # 如果还没导入就加上
 from diffusers.models.unet_2d_condition import UNet2DConditionOutput
 
-from diffusers.models.unet_2d_blocks import (
-    CrossAttnDownBlock2D,
-    CrossAttnUpBlock2D,
-    DownBlock2D,
-    UNetMidBlock2DCrossAttn,
-    UNetMidBlock2DSimpleCrossAttn,
-    UpBlock2D,
-    get_down_block,
-    get_up_block,
-)
-from types import MethodType
 
+from types import MethodType
+import numpy as np
+
+from fvcore.nn import FlopCountAnalysis
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 # logger = get_logger(__name__)
@@ -109,7 +96,8 @@ def teacache_forward(
         # 外部可随时改这些开关/超参
         self.enable_teacache = False  # 开/关 TeaCache
         self.num_steps = 50  # 与调度器步数对齐
-        self.rel_l1_thresh =  0 # 累计阈值（经验 0.08~0.20）
+        self.rel_l1_thresh =  0.3 # 累计阈值（经验 0.08~0.20）
+        print(1234)
         print(self.rel_l1_thresh)
         self.use_output_extrapolation = True  # 跳步时是否做输出残差外推
 
@@ -119,6 +107,10 @@ def teacache_forward(
         self._tc_prev_mod_inp = None  # 上一次“用于比较的输入”（见下）
         self._tc_prev_out = None  # 上一次最终输出
         self._tc_prev_out_residual = None  # 输出残差 y_{t-1}-y_{t-2}
+
+        # # ===== FLOPs 相关计数（新增）=====
+        # self.unet_call_cnt = 0   # 真正完整跑 UNet 的次数（没有被 TeaCache 复用）
+        # self.unet_skip_cnt = 0   # 被 TeaCache 直接复用输出的次数
 
     # ------------ 原版前半：准备尺寸/掩码/时间嵌入 ------------
 
@@ -180,6 +172,8 @@ def teacache_forward(
     sample = self.conv_in(sample)
 
     # ------------------ TeaCache 判定（conv_in 之后、down 之前） ------------------
+    self._tc_last_cache_hit = False
+
     if self.enable_teacache:
         # 用简易“尺度归一”后的 sample 作为可比较特征（不引入新参数）
         denom = sample.detach().abs().mean(dim=(1, 2, 3), keepdim=True) + 1e-8
@@ -221,6 +215,9 @@ def teacache_forward(
 
         # 跳步：直接复用上次输出（可选加一次输出残差外推）
         if not should_compute:
+            self._tc_last_cache_hit = True
+
+            self.unet_skip_cnt += 1
             fast_out = self._tc_prev_out
             if (fast_out is not None) and self.use_output_extrapolation and (
                     self._tc_prev_out_residual is not None):
@@ -228,6 +225,10 @@ def teacache_forward(
             return UNet2DConditionOutput(sample=fast_out)
 
     # 3. down
+    # ===== FLOPs 相关计数（新增）=====
+    if self.enable_teacache:
+        self.unet_call_cnt += 1   # ← 新增：只有没被跳步的 forward 才会走到这里
+
     down_block_res_samples = (sample,)
     for downsample_block in self.down_blocks:
         if hasattr(downsample_block, "has_cross_attention") and downsample_block.has_cross_attention:
@@ -279,15 +280,34 @@ def teacache_forward(
     sample = self.conv_out(sample)
 
     # ------------------ TeaCache 更新（conv_out 之后） ------------------
+    # if self.enable_teacache:
+    #     if self._tc_prev_out is not None:
+    #         self._tc_prev_out_residual = (sample - self._tc_prev_out).detach()
+    #     self._tc_prev_out = sample.detach()
+    #
+    # if not return_dict:
+    #     return (sample,)
+
+    # ------------------ TeaCache 更新（conv_out 之后） ------------------
     if self.enable_teacache:
         if self._tc_prev_out is not None:
             self._tc_prev_out_residual = (sample - self._tc_prev_out).detach()
         self._tc_prev_out = sample.detach()
 
+    # === 记录每一步的输出特征，用于 PCA / 误差曲线 ===
+    if getattr(self, "_save_feature_traj", False):
+        if not hasattr(self, "_feature_traj"):
+            self._feature_traj = []
+        self._feature_traj.append(
+            sample.detach().flatten().cpu()
+        )
+
+
     if not return_dict:
         return (sample,)
 
     return UNet2DConditionOutput(sample=sample)
+
 
 def collate_fn(examples):
     """Concat a batch of sampled image in dataloader
@@ -305,7 +325,14 @@ def reset_teacache(unet):
     unet._tc_prev_mod_inp = None
     unet._tc_prev_out = None
     unet._tc_prev_out_residual = None
-
+    # 清空特征轨迹
+    if hasattr(unet, "_feature_traj"):
+        unet._feature_traj = []
+    # 清空 FLOPs 统计次数
+    if hasattr(unet, "unet_call_cnt"):
+        unet.unet_call_cnt = 0
+    if hasattr(unet, "unet_skip_cnt"):
+        unet.unet_skip_cnt = 0
 
 def test(
     config: str,
@@ -367,9 +394,9 @@ def test(
     #cache
     unet.teacache_forward = MethodType(teacache_forward, unet)
     unet.forward = unet.teacache_forward
-    unet.enable_teacache = True
+    unet.enable_teacache =  True
     unet.num_steps = editing_config['num_inference_steps']
-    unet.rel_l1_thresh = 0.1
+    unet.rel_l1_thresh = 0.3
     print(unet.rel_l1_thresh)
 
     if 'target' not in test_pipeline_config:
@@ -389,6 +416,8 @@ def test(
     )
 
     sched = BDIAScheduler.from_pretrained(pretrained_model_path, subfolder="scheduler")
+    pipeline.scheduler.gamma = 0.5
+    print("===== EXPERIMENT GAMMA =", pipeline.scheduler.gamma, "=====")
 
     print(type(sched))  # 期望：<class '...BDIAScheduler'>
     print("is BDIAScheduler:", isinstance(sched, BDIAScheduler))  # True
@@ -437,6 +466,70 @@ def test(
     train_sample_save_path = os.path.join(logdir, "train_samples.gif")
     log_train_samples(save_path=train_sample_save_path, train_dataloader=train_dataloader)
 
+    # ================== CPU 上测一次 UNet 的 FLOPs（latent 形状） ==================
+    if accelerator.is_main_process:
+        # 1. 取一批真实的数据，只用来读出 batch / 帧数 / 分辨率
+        batch_for_flops = next(iter(train_dataloader))
+        images_flops = batch_for_flops["images"]  # [B, 3, F, H, W]
+        B, C_img, F, H, W = images_flops.shape
+
+        # 2. latent 的通道数和尺寸（4 × 64 × 64）
+        in_channels = unet.config.in_channels  # 一般 = 4
+        down_factor = 8  # Stable Diffusion VAE 下采样 8 倍
+        H_lat = H // down_factor
+        W_lat = W // down_factor
+
+        # 构造一个“形状正确”的随机 latent： [B*F, 4, 64, 64]
+        sample_flops = torch.randn(
+            B * F, in_channels, H_lat, W_lat,
+            dtype=torch.float32,
+        )
+
+        # 3. 文本 embedding：和真实一样，先算 [B, seq, dim]，再复制到每一帧
+        with torch.no_grad():
+            text_outputs = text_encoder(batch_for_flops["prompt_ids"])
+            text_emb = text_outputs[0].to(torch.float32)  # [B, seq_len, dim]
+
+        text_emb = text_emb.repeat_interleave(F, dim=0)  # [B*F, seq_len, dim]
+
+        # 4. timestep：任意 long 值即可，和 FLOPs 无关
+        timestep_flops = torch.full(
+            (sample_flops.shape[0],),
+            fill_value=500,
+            dtype=torch.long,
+        )
+
+        # 5. 用 CPU 上的 UNet 做 trace（避免 accelerator / GPU / xformers 干扰）
+        unet_flops = unet.to("cpu").float()
+        unet_flops.eval()
+
+        # 🔧 关键一步：禁用 xformers memory_efficient_attention（否则 CPU 上会报 NotImplementedError）
+        for m in unet_flops.modules():
+            if hasattr(m, "set_use_memory_efficient_attention_xformers"):
+                m.set_use_memory_efficient_attention_xformers(False)
+            if hasattr(m, "use_memory_efficient_attention_xformers"):
+                m.use_memory_efficient_attention_xformers = False
+            # 有些自定义 attention 可能用这个 flag
+            if hasattr(m, "use_memory_efficient_attention"):
+                m.use_memory_efficient_attention = False
+
+        from fvcore.nn import FlopCountAnalysis
+        with teacache_disabled(unet_flops):
+            flops_analyser = FlopCountAnalysis(
+                unet_flops, (sample_flops, timestep_flops, text_emb)
+            )
+            single_flops = flops_analyser.total()
+
+        # 把结果挂回原 unet，后面乘以调用次数
+        unet.single_flops = single_flops
+        logger.info(
+            f"[FLOPs] 单次 UNet forward ≈ {single_flops / 1e9:.2f} GFLOPs "
+            f"(batch={sample_flops.shape[0]}, frames={F}, H_lat={H_lat}, W_lat={W_lat})"
+        )
+    # ================== FLOPs 统计结束 ==================
+
+    # 这里再交给 accelerator.wrap
+
     unet, train_dataloader  = accelerator.prepare(
         unet, train_dataloader
     )
@@ -453,7 +546,6 @@ def test(
     # These models are only used for inference, keeping weights in full precision is not required.
     vae.to(accelerator.device, dtype=weight_dtype)
     text_encoder.to(accelerator.device, dtype=weight_dtype)
-
 
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
@@ -529,7 +621,9 @@ def test(
             core_unet = pipeline.unet
             core_unet.eval()
             pipeline.unet.enable_teacache = True
+            core_unet._save_feature_traj = True
             reset_teacache(core_unet)  # ← 采样前重置
+
             validation_sample_logger.log_sample_images(
                 image=images, # torch.Size([8, 3, 512, 512])
                 pipeline=pipeline,
@@ -538,9 +632,42 @@ def test(
                 latents = batch['ddim_init_latents'],
                 save_dir = logdir if verbose else None
             )
+
+            if hasattr(core_unet, "_feature_traj") and len(core_unet._feature_traj) > 0:
+                # stack 成 [T, D]
+                feats_tensor = torch.stack(core_unet._feature_traj, dim=0)  # [T, D]
+                features_bdia = feats_tensor.numpy()
+                np.save(os.path.join(logdir, "features_ddim.npy"), features_bdia)
+                print("saved bdia features to:", os.path.join(logdir, "features_ddim.npy"))
+            else:
+                print("Warning: no feature trajectory recorded; check _save_feature_traj and forward usage")
         # accelerator.log(logs, step=step)
     print(pipeline.unet.enable_teacache)
     accelerator.end_training()
+
+    if validation_sample_logger is not None:
+        core_unet = pipeline.unet
+        core_unet.eval()
+        pipeline.unet.enable_teacache = True
+        reset_teacache(core_unet)  # ← 采样前重置
+        validation_sample_logger.log_sample_images(
+            image=images,  # torch.Size([8, 3, 512, 512])
+            pipeline=pipeline,
+            device=accelerator.device,
+            step=0,
+            latents=batch['ddim_init_latents'],
+            save_dir=logdir if verbose else None
+        )
+
+        # ====== 采样结束后统计总 FLOPs（新增） ======
+        if hasattr(core_unet, "single_flops") and hasattr(core_unet, "unet_call_cnt"):
+            total_flops = core_unet.single_flops * core_unet.unet_call_cnt
+            logger.info(
+                f"[FLOPs] 实际完整 UNet 调用次数: {core_unet.unet_call_cnt}, "
+                f"TeaCache 跳过次数: {getattr(core_unet, 'unet_skip_cnt', 0)}, "
+                f"单次 UNet FLOPs: {core_unet.single_flops / 1e9:.2f} GFLOPs, "
+                f"总 UNet FLOPs ≈ {total_flops / 1e12:.2f} TFLOPs"
+            )
 
 
 @click.command()
@@ -550,6 +677,7 @@ def run(config):
     if 'unet' in os.listdir(Omegadict['pretrained_model_path']):
         test(config=config, **Omegadict)
     else:
+        # Go through all ckpt if possible
         # Go through all ckpt if possible
         checkpoint_list = sorted(glob(os.path.join(Omegadict['pretrained_model_path'], 'checkpoint_*')))
         print('checkpoint to evaluate:')
