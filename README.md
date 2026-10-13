@@ -47,9 +47,10 @@ C-BDIA demonstrates improved editing quality under aggressive caching while main
 
 Visual comparisons of C-DDIM and C-BDIA.
 
-| Input | C-DDIM | C-BDIA |
-|:---:|:---:|:---:|
-| Coming Soon | Coming Soon | Coming Soon |
+| Input | DDIM(T=20) | C-DDIM | C-BDIA |
+|:---:|:---:|:---:|:---:|
+| <img src="assets/qualitative/train_samples.gif" width="260"> | <img src="assets/qualitative/DDIM0.14.gif" width="260"> | <img src="assets/qualitative/CBDIA0.14.gif" width="260"> |
+
 
 ## Installation
 
