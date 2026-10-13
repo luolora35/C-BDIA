@@ -76,6 +76,17 @@ The pretrained checkpoint is available from:
 
 https://huggingface.co/CompVis/stable-diffusion-v1-4
 
+## Usage
+
+### Video Style Editing
+
+To perform watercolor-style video editing using C-BDIA, run:
+
+```bash
+python bdia_cache.py --config config/style/jeep_watercolor.yaml
+```
+
+You can modify the YAML configuration file to perform other video editing tasks.
 ## Inference
 
 C-BDIA supports configurable sampling steps, cache thresholds, and bidirectional correction strength.
