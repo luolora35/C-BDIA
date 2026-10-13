@@ -49,7 +49,7 @@ Visual comparisons of C-DDIM and C-BDIA.
 
 | Input | DDIM(T=20) | C-DDIM | C-BDIA |
 |:---:|:---:|:---:|:---:|
-| <img src="assets/qualitative/train_samples.gif" width="260"> | <img src="assets/qualitative/DDIM0.14.gif" width="260"> | <img src="assets/qualitative/CBDIA0.14.gif" width="260"> |
+| <img src="assets/qualitative/train_samples.gif" width="260"> |<img src="assets/qualitative/DDIM20.gif" width="260"> | <img src="assets/qualitative/DDIM0.14.gif" width="260"> | <img src="assets/qualitative/CBDIA0.14step_0_1_0.gif" width="260"> |
 
 
 ## Installation
